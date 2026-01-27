@@ -5,7 +5,7 @@ import pandas as pd
 import time
 from data_loader import DataLoader
 from analyzer import Analyzer
-from assets import get_all_tickers_list
+from assets import get_asset_options, get_ticker_from_option
 
 # Page config
 st.set_page_config(page_title="Real-Time Trading Analysis", layout="wide")
@@ -19,35 +19,45 @@ st.title("Real-Time Trading Analysis & Pattern Recognition")
 # Sidebar
 st.sidebar.header("Configuration")
 
-# Pinned Stocks
+# Pinned Stocks Logic
 st.sidebar.subheader("Pinned / Favorites")
 pinned_selection = st.sidebar.radio("Select a Pinned Stock:", ["None"] + st.session_state.pinned_tickers)
 
-# Ticker Selection
-st.sidebar.subheader("Asset Selection")
-# Suggestions
-popular_tickers = get_all_tickers_list()
-selected_ticker_suggest = st.sidebar.selectbox("Quick Select (Top Assets):", ["Custom"] + popular_tickers, index=0)
+# Combined Search Logic
+st.sidebar.subheader("Asset Search")
 
-if selected_ticker_suggest != "Custom":
-    ticker_input_val = selected_ticker_suggest
+# 1. Build Options List
+# Start with special "Type Manually" option, then popular assets
+asset_options = ["Type Manually / Custom"] + get_asset_options()
+
+# 2. Selectbox acting as search bar
+selected_asset_label = st.sidebar.selectbox("Search Asset (Name or Ticker):", asset_options, index=1)
+
+# 3. Resolve Ticker
+if selected_asset_label == "Type Manually / Custom":
+    # Show text input if they chose manual
+    ticker_input_val = st.sidebar.text_input("Enter Ticker Symbol:", value="AAPL")
 else:
-    ticker_input_val = "AAPL" # Default if Custom
+    # Extract ticker from "Name (Ticker)" string
+    ticker_input_val = get_ticker_from_option(selected_asset_label)
 
-# If user clicked a pinned stock, override
+# Override if pinned stock is selected
 if pinned_selection != "None":
     ticker_input_val = pinned_selection
+    # Optional: We could try to set the selectbox to match this, but it's tricky with Streamlit reruns.
+    # Just showing the text input value is enough.
 
-ticker_input = st.sidebar.text_input("Ticker Symbol (e.g., NVDA, GLD):", value=ticker_input_val)
+# Final Ticker to use
+ticker_input = ticker_input_val
 
-# Add to Pinned
-if st.sidebar.button("Pin Current Ticker"):
+# Pin/Unpin Actions
+col_pin, col_unpin = st.sidebar.columns(2)
+if col_pin.button("Pin This"):
     if ticker_input not in st.session_state.pinned_tickers:
         st.session_state.pinned_tickers.append(ticker_input)
         st.sidebar.success(f"Pinned {ticker_input}")
 
-# Remove from Pinned
-if st.sidebar.button("Unpin Current Ticker"):
+if col_unpin.button("Unpin This"):
     if ticker_input in st.session_state.pinned_tickers:
         st.session_state.pinned_tickers.remove(ticker_input)
         st.sidebar.success(f"Unpinned {ticker_input}")
@@ -99,10 +109,9 @@ def render_analysis():
 
         # KPI Metrics
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Current Price", f"{last_price:.2f}")
-        col2.metric("Trend Forecast (Next Candle)", f"{prediction:.2f}", delta=f"{prediction - last_price:.2f}")
-        col3.metric("AI Signal", signal, delta_color="normal" if signal_type=="Neutral" else ("off" if signal_type=="Bearish" else "inverse")) # Streamlit delta color logic is tricky, usually green is up.
-        # Actually better to style signal text manually or use st.markdown, but metric is cleaner.
+        col1.metric(f"{ticker_input} Price", f"{last_price:.2f}")
+        col2.metric("Trend Forecast (Next)", f"{prediction:.2f}", delta=f"{prediction - last_price:.2f}")
+        col3.metric("AI Signal", signal, delta_color="normal" if signal_type=="Neutral" else ("off" if signal_type=="Bearish" else "inverse"))
         col4.metric("Latest Pattern", latest_pattern)
         
         if signal == "Strong Buy" or signal == "Buy":
