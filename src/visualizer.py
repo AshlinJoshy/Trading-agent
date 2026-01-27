@@ -23,6 +23,13 @@ st.sidebar.header("Configuration")
 st.sidebar.subheader("Pinned / Favorites")
 pinned_selection = st.sidebar.radio("Select a Pinned Stock:", ["None"] + st.session_state.pinned_tickers)
 
+if pinned_selection != "None":
+    if st.sidebar.button(f"Remove '{pinned_selection}'"):
+        st.session_state.pinned_tickers.remove(pinned_selection)
+        st.sidebar.success(f"Removed {pinned_selection}")
+        time.sleep(0.5) # Give user time to see message
+        st.rerun()
+
 # Combined Search Logic
 st.sidebar.subheader("Asset Search")
 
@@ -44,23 +51,15 @@ else:
 # Override if pinned stock is selected
 if pinned_selection != "None":
     ticker_input_val = pinned_selection
-    # Optional: We could try to set the selectbox to match this, but it's tricky with Streamlit reruns.
-    # Just showing the text input value is enough.
 
 # Final Ticker to use
 ticker_input = ticker_input_val
 
-# Pin/Unpin Actions
-col_pin, col_unpin = st.sidebar.columns(2)
-if col_pin.button("Pin This"):
+# Pin Action
+if st.sidebar.button("Pin Current Asset"):
     if ticker_input not in st.session_state.pinned_tickers:
         st.session_state.pinned_tickers.append(ticker_input)
         st.sidebar.success(f"Pinned {ticker_input}")
-
-if col_unpin.button("Unpin This"):
-    if ticker_input in st.session_state.pinned_tickers:
-        st.session_state.pinned_tickers.remove(ticker_input)
-        st.sidebar.success(f"Unpinned {ticker_input}")
 
 
 # Interval Selection
