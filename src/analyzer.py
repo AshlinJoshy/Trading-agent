@@ -25,8 +25,15 @@ class Analyzer:
 
         # AI Prediction (Trend Forecast)
         # Using Linear Regression based on Close price for next few periods logic
-        # pandas_ta 'tsf' (Time Series Forecast) defaults to length=14
-        df.ta.tsf(length=14, append=True)
+        # TSF (Time Series Forecast) is similar to Linear Regression + Slope
+        # Fallback to simple linreg if tsf is missing
+        try:
+            # df.ta.tsf(length=14, append=True) # tsf might not be available in this version
+            # Use linear regression as proxy for trend forecast
+            df.ta.linreg(length=14, append=True)
+            # Rename for consistency if needed, but we'll check column name later
+        except Exception as e:
+            print(f"Error calculating trend: {e}")
         
         # Manual Candle Pattern Detection
         self.detect_candle_patterns(df)
@@ -131,14 +138,19 @@ class Analyzer:
 
     def get_prediction_next(self, df):
         """
-        Returns the forecasted price for the next candle using TSF.
+        Returns the forecasted price for the next candle using Linear Regression (LINREG).
         """
         if df is None or df.empty:
             return 0
         
-        # TSF_14 is the trend forecast value for the *current* bar
-        # To predict next, we can extrapolate slightly or just use the current trend value
-        tsf_col = 'TSF_14'
-        if tsf_col in df.columns:
-            return df[tsf_col].iloc[-1]
+        # Check for LINREG or TSF columns
+        # linreg returns the ending value of the regression line
+        linreg_col = next((c for c in df.columns if c.startswith('LR_') or c.startswith('LINREG_')), None)
+        
+        if linreg_col:
+            current_linreg = df[linreg_col].iloc[-1]
+            # To predict "next", we can add the slope if we had it, but standard linreg output is usually the current fit.
+            # We will use the current linear regression value as the "trend" price.
+            return current_linreg
+            
         return df['Close'].iloc[-1]

@@ -139,8 +139,8 @@ def render_analysis():
         if 'Support' in df.columns:
              fig.add_trace(go.Scatter(x=df.index, y=df['Support'], line=dict(color='green', width=1), name='Support'), row=1, col=1)
 
-        # Trend Forecast Line (TSF)
-        tsf_col = next((c for c in df.columns if c.startswith('TSF_')), None)
+        # Trend Forecast Line (TSF/Linear Reg)
+        tsf_col = next((c for c in df.columns if c.startswith('TSF_') or c.startswith('LR_') or c.startswith('LINREG_')), None)
         if tsf_col:
              fig.add_trace(go.Scatter(x=df.index, y=df[tsf_col], line=dict(color='orange', width=2), name='AI Trend Line'), row=1, col=1)
 
