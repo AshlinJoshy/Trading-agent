@@ -10,6 +10,26 @@ from assets import get_asset_options, get_ticker_from_option
 # Page config
 st.set_page_config(page_title="Real-Time Trading Analysis", layout="wide")
 
+# Custom CSS for Mobile Optimization
+st.markdown("""
+<style>
+    /* Metric Cards Mobile Fit */
+    div[data-testid="stMetric"] {
+        background-color: #1E1E1E;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+    }
+    /* Reduce padding on mobile */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Session State for Pinned Stocks
 if 'pinned_tickers' not in st.session_state:
     st.session_state.pinned_tickers = ["AAPL", "BTC-USD", "EURUSD=X"]
@@ -27,35 +47,25 @@ if pinned_selection != "None":
     if st.sidebar.button(f"Remove '{pinned_selection}'"):
         st.session_state.pinned_tickers.remove(pinned_selection)
         st.sidebar.success(f"Removed {pinned_selection}")
-        time.sleep(0.5) # Give user time to see message
+        time.sleep(0.5) 
         st.rerun()
 
 # Combined Search Logic
 st.sidebar.subheader("Asset Search")
 
-# 1. Build Options List
-# Start with special "Type Manually" option, then popular assets
 asset_options = ["Type Manually / Custom"] + get_asset_options()
-
-# 2. Selectbox acting as search bar
 selected_asset_label = st.sidebar.selectbox("Search Asset (Name or Ticker):", asset_options, index=1)
 
-# 3. Resolve Ticker
 if selected_asset_label == "Type Manually / Custom":
-    # Show text input if they chose manual
     ticker_input_val = st.sidebar.text_input("Enter Ticker Symbol:", value="AAPL")
 else:
-    # Extract ticker from "Name (Ticker)" string
     ticker_input_val = get_ticker_from_option(selected_asset_label)
 
-# Override if pinned stock is selected
 if pinned_selection != "None":
     ticker_input_val = pinned_selection
 
-# Final Ticker to use
 ticker_input = ticker_input_val
 
-# Pin Action
 if st.sidebar.button("Pin Current Asset"):
     if ticker_input not in st.session_state.pinned_tickers:
         st.session_state.pinned_tickers.append(ticker_input)
@@ -72,7 +82,7 @@ interval_map = {
     "1 Day": "1d",
     "1 Week": "1wk"
 }
-selected_interval_label = st.sidebar.selectbox("Candle Interval:", list(interval_map.keys()), index=2) # Default 15m
+selected_interval_label = st.sidebar.selectbox("Candle Interval:", list(interval_map.keys()), index=2) 
 selected_interval = interval_map[selected_interval_label]
 
 update_interval = st.sidebar.slider("Update Speed (seconds)", 5, 300, 60)
@@ -88,7 +98,6 @@ placeholder = st.empty()
 def render_analysis():
     with placeholder.container():
         # Fetch Data
-        # period logic handled inside loader based on interval
         data_map = loader.get_realtime_data(ticker=ticker_input, interval=selected_interval)
         
         if ticker_input not in data_map:
@@ -102,28 +111,37 @@ def render_analysis():
         
         # Get Analysis Results
         last_price = df['Close'].iloc[-1]
-        signal, signal_type = analyzer.get_latest_signal(df)
+        signal, signal_type, targets = analyzer.get_latest_signal(df)
         prediction = analyzer.get_prediction_next(df)
         latest_pattern = df['Pattern'].iloc[-1] if df['Pattern'].iloc[-1] else "None"
 
-        # KPI Metrics
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric(f"{ticker_input} Price", f"{last_price:.2f}")
-        col2.metric("Trend Forecast (Next)", f"{prediction:.2f}", delta=f"{prediction - last_price:.2f}")
-        col3.metric("AI Signal", signal, delta_color="normal" if signal_type=="Neutral" else ("off" if signal_type=="Bearish" else "inverse"))
-        col4.metric("Latest Pattern", latest_pattern)
+        # KPI Metrics Layout - Responsive
+        # Use columns but allow them to wrap naturally or use smaller layout for mobile
+        st.subheader(f"{ticker_input} - {last_price:.2f}")
         
-        if signal == "Strong Buy" or signal == "Buy":
-             st.success(f"AI Suggestion: Bullish momentum detected. Consider Long position if confirmed.")
-        elif signal == "Strong Sell" or signal == "Sell":
-             st.error(f"AI Suggestion: Bearish pressure detected. Consider Short position or Exit.")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Trend Forecast", f"{prediction:.2f}", delta=f"{prediction - last_price:.2f}")
+        m2.metric("AI Signal", signal, delta_color="normal" if signal_type=="Neutral" else ("off" if signal_type=="Bearish" else "inverse"))
+        m3.metric("Latest Pattern", latest_pattern)
+        
+        # Trade Targets Display
+        if signal_type != "Neutral":
+            st.markdown(f"### 🎯 Trade Targets ({signal_type})")
+            t1, t2, t3 = st.columns(3)
+            t1.info(f"**Entry**: {targets['entry']:.2f}")
+            t2.success(f"**Take Profit**: {targets['take_profit']:.2f}")
+            t3.error(f"**Stop Loss**: {targets['stop_loss']:.2f}")
+            
+            if signal_type == "Bullish":
+                st.success(f"**Strategy**: Long Position suggested. Target {targets['take_profit']:.2f}. Cut loss if drops below {targets['stop_loss']:.2f}.")
+            else:
+                st.error(f"**Strategy**: Short Position suggested. Target {targets['take_profit']:.2f}. Cover if rises above {targets['stop_loss']:.2f}.")
         else:
-             st.info("AI Suggestion: Market is neutral or choppy. Wait for clearer setup.")
-
+            st.info("Market is Neutral. No clear trade targets currently.")
 
         # Create Chart
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                            vertical_spacing=0.05, subplot_titles=(f'{ticker_input} Price & Analysis ({selected_interval})', 'Volume'),
+                            vertical_spacing=0.05, subplot_titles=('Price', 'Volume'),
                             row_width=[0.2, 0.7])
 
         # Candlestick
@@ -133,45 +151,50 @@ def render_analysis():
                                      name='OHLC'), row=1, col=1)
 
         # Indicators
-        # BB
         bbu_col = next((c for c in df.columns if c.startswith('BBU_')), None)
         bbl_col = next((c for c in df.columns if c.startswith('BBL_')), None)
         if bbu_col:
-            fig.add_trace(go.Scatter(x=df.index, y=df[bbu_col], line=dict(color='gray', width=1, dash='dot'), name='Upper Band'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df[bbu_col], line=dict(color='gray', width=1, dash='dot'), name='Upper BB'), row=1, col=1)
         if bbl_col:
-            fig.add_trace(go.Scatter(x=df.index, y=df[bbl_col], line=dict(color='gray', width=1, dash='dot'), name='Lower Band'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df[bbl_col], line=dict(color='gray', width=1, dash='dot'), name='Lower BB'), row=1, col=1)
         
-        # Support/Resistance
         if 'Resistance' in df.columns:
              fig.add_trace(go.Scatter(x=df.index, y=df['Resistance'], line=dict(color='red', width=1), name='Resistance'), row=1, col=1)
         if 'Support' in df.columns:
              fig.add_trace(go.Scatter(x=df.index, y=df['Support'], line=dict(color='green', width=1), name='Support'), row=1, col=1)
 
-        # Trend Forecast Line (TSF/Linear Reg)
         tsf_col = next((c for c in df.columns if c.startswith('TSF_') or c.startswith('LR_') or c.startswith('LINREG_')), None)
         if tsf_col:
-             fig.add_trace(go.Scatter(x=df.index, y=df[tsf_col], line=dict(color='orange', width=2), name='AI Trend Line'), row=1, col=1)
+             fig.add_trace(go.Scatter(x=df.index, y=df[tsf_col], line=dict(color='orange', width=2), name='Trend'), row=1, col=1)
+
+        # Plot Targets if valid
+        if signal_type != "Neutral" and targets['take_profit'] > 0:
+             # Add horizontal lines for targets
+             fig.add_hline(y=targets['take_profit'], line_dash="dash", line_color="green", annotation_text="TP", row=1, col=1)
+             fig.add_hline(y=targets['stop_loss'], line_dash="dash", line_color="red", annotation_text="SL", row=1, col=1)
 
         # Patterns Markers
-        recent_df = df.tail(100) # Show markers only for recent history
-        
-        # Bullish
+        recent_df = df.tail(100)
         bullish_mask = recent_df['is_Bullish_Engulfing'] | recent_df['is_Hammer']
         if bullish_mask.any():
             bullish_pts = recent_df[bullish_mask]
-            fig.add_trace(go.Scatter(x=bullish_pts.index, y=bullish_pts['Low']*0.999, mode='markers', marker=dict(symbol='triangle-up', size=10, color='lime'), name='Bullish Pattern'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=bullish_pts.index, y=bullish_pts['Low']*0.999, mode='markers', marker=dict(symbol='triangle-up', size=10, color='lime'), name='Bullish'), row=1, col=1)
 
-        # Bearish
         bearish_mask = recent_df['is_Bearish_Engulfing'] | recent_df['is_Shooting_Star']
         if bearish_mask.any():
             bearish_pts = recent_df[bearish_mask]
-            fig.add_trace(go.Scatter(x=bearish_pts.index, y=bearish_pts['High']*1.001, mode='markers', marker=dict(symbol='triangle-down', size=10, color='red'), name='Bearish Pattern'), row=1, col=1)
-
+            fig.add_trace(go.Scatter(x=bearish_pts.index, y=bearish_pts['High']*1.001, mode='markers', marker=dict(symbol='triangle-down', size=10, color='red'), name='Bearish'), row=1, col=1)
 
         # Volume
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume'), row=2, col=1)
 
-        fig.update_layout(xaxis_rangeslider_visible=False, height=700, margin=dict(l=20, r=20, t=30, b=20))
+        # Mobile Optimized Layout
+        fig.update_layout(
+            xaxis_rangeslider_visible=False, 
+            height=600, 
+            margin=dict(l=10, r=10, t=30, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         # Data Table
