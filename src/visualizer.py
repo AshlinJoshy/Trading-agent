@@ -8,6 +8,8 @@ import os
 from data_loader import DataLoader
 from analyzer import Analyzer
 from assets import get_asset_options, get_ticker_from_option
+from sentiment import SentimentAnalyzer
+from backtester import Backtester
 
 # Page config
 st.set_page_config(page_title="Real-Time Trading Analysis", layout="wide")
@@ -65,7 +67,7 @@ pinned_selection = st.sidebar.radio("Select a Pinned Stock:", ["None"] + st.sess
 if pinned_selection != "None":
     if st.sidebar.button(f"Remove '{pinned_selection}'"):
         st.session_state.pinned_tickers.remove(pinned_selection)
-        save_pinned_stocks(st.session_state.pinned_tickers) # Save on change
+        save_pinned_stocks(st.session_state.pinned_tickers) 
         st.sidebar.success(f"Removed {pinned_selection}")
         time.sleep(0.5) 
         st.rerun()
@@ -89,7 +91,7 @@ ticker_input = ticker_input_val
 if st.sidebar.button("Pin Current Asset"):
     if ticker_input not in st.session_state.pinned_tickers:
         st.session_state.pinned_tickers.append(ticker_input)
-        save_pinned_stocks(st.session_state.pinned_tickers) # Save on change
+        save_pinned_stocks(st.session_state.pinned_tickers) 
         st.sidebar.success(f"Pinned {ticker_input}")
 
 
@@ -112,6 +114,8 @@ auto_refresh = st.sidebar.checkbox("Auto Refresh Data", value=False)
 # Initialize modules
 loader = DataLoader(ticker_input)
 analyzer = Analyzer()
+sentiment_analyzer = SentimentAnalyzer()
+backtester = Backtester()
 
 # Placeholder for content
 placeholder = st.empty()
@@ -120,6 +124,20 @@ def render_analysis():
     with placeholder.container():
         # Fetch Data
         data_map = loader.get_realtime_data(ticker=ticker_input, interval=selected_interval)
+        
+        # Multi-Timeframe Check (Simple: Check 1D Trend for context)
+        # Only fetch 1D if we are on a smaller timeframe
+        is_higher_tf_bullish = None
+        if selected_interval in ['1m', '5m', '15m', '1h']:
+            data_1d_map = loader.get_realtime_data(ticker=ticker_input, interval='1d', period='1mo')
+            if ticker_input in data_1d_map:
+                df_1d = data_1d_map[ticker_input]
+                # Simple logic: Is Close > SMA20?
+                if len(df_1d) > 20:
+                    last_close_1d = df_1d['Close'].iloc[-1]
+                    sma20_1d = df_1d['Close'].rolling(window=20).mean().iloc[-1]
+                    is_higher_tf_bullish = last_close_1d > sma20_1d
+
         
         if ticker_input not in data_map:
             st.error(f"No data found for {ticker_input} with interval {selected_interval}. Market might be closed or ticker invalid.")
@@ -136,6 +154,16 @@ def render_analysis():
         prediction = analyzer.get_prediction_next(df)
         latest_pattern = df['Pattern'].iloc[-1] if df['Pattern'].iloc[-1] else "None"
 
+        # Confluence Check
+        confluence_msg = ""
+        if is_higher_tf_bullish is not None:
+            if signal_type == "Bullish" and is_higher_tf_bullish:
+                confluence_msg = "✅ Confluence: Daily Trend is also Bullish."
+            elif signal_type == "Bearish" and not is_higher_tf_bullish:
+                confluence_msg = "✅ Confluence: Daily Trend is also Bearish."
+            elif signal_type != "Neutral":
+                confluence_msg = "⚠️ Warning: Signal opposes Daily Trend."
+
         # KPI Metrics Layout
         st.subheader(f"{ticker_input} - {last_price:.2f}")
         
@@ -144,6 +172,12 @@ def render_analysis():
         m2.metric("AI Signal", signal, delta_color="normal" if signal_type=="Neutral" else ("off" if signal_type=="Bearish" else "inverse"))
         m3.metric("Latest Pattern", latest_pattern)
         
+        if confluence_msg:
+            if "Warning" in confluence_msg:
+                st.warning(confluence_msg)
+            else:
+                st.success(confluence_msg)
+
         # Trade Targets Display
         if signal_type != "Neutral":
             st.markdown(f"### 🎯 Trade Targets ({signal_type})")
@@ -158,6 +192,7 @@ def render_analysis():
                 st.error(f"**Strategy**: Short Position suggested. Target {targets['take_profit']:.2f}. Cover if rises above {targets['stop_loss']:.2f}.")
         else:
             st.info("Market is Neutral. No clear trade targets currently.")
+
 
         # Create Chart
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
@@ -208,9 +243,7 @@ def render_analysis():
         # Volume
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume'), row=2, col=1)
 
-        # Layout Improvements:
-        # 1. Legend at the top (orientation 'h') to avoid overlapping with nav controls (usually top right).
-        # 2. Dragmode 'pan' and ScrollZoom enabled for TradingView-like feel.
+        # Layout Improvements
         fig.update_layout(
             xaxis_rangeslider_visible=False, 
             height=600, 
@@ -222,10 +255,9 @@ def render_analysis():
                 xanchor="left", 
                 x=0
             ),
-            dragmode='pan' # Default to pan instead of zoom select
+            dragmode='pan' 
         )
         
-        # Configure Plotly Config for better UX (TradingView-like)
         config = {
             'scrollZoom': True,
             'displayModeBar': True,
@@ -235,8 +267,42 @@ def render_analysis():
         
         st.plotly_chart(fig, use_container_width=True, config=config)
 
-        # Data Table
-        with st.expander("View Raw Data & Signals"):
+        # --- Additional Features Tabs ---
+        tab1, tab2, tab3 = st.tabs(["Backtest Strategy", "News Sentiment", "Raw Data"])
+        
+        with tab1:
+            st.subheader("Strategy Backtest (Last 50 Candles)")
+            if st.button("Run Backtest"):
+                with st.spinner("Running Backtest..."):
+                    results = backtester.run_backtest(df)
+                    if "error" in results:
+                        st.error(results["error"])
+                    else:
+                        b1, b2, b3, b4 = st.columns(4)
+                        b1.metric("Total Trades", results["total_trades"])
+                        b2.metric("Win Rate", f"{results['win_rate']}%")
+                        b3.metric("Avg Return", f"{results['avg_return']}%")
+                        b4.metric("Total Return", f"{results['total_return']}%")
+                        
+                        if results['total_return'] > 0:
+                            st.success("This strategy has been profitable recently.")
+                        else:
+                            st.warning("This strategy has been unprofitable recently. Proceed with caution.")
+
+        with tab2:
+            st.subheader("Recent News Sentiment")
+            if st.button("Analyze News"):
+                with st.spinner("Fetching & Analyzing News..."):
+                    score, label, news_items = sentiment_analyzer.get_news_sentiment(ticker_input)
+                    st.metric("Sentiment Score", f"{score:.2f}", label)
+                    
+                    for news in news_items:
+                        with st.expander(news['title']):
+                            st.write(f"**Publisher:** {news['publisher']}")
+                            st.write(f"**Sentiment:** {news['polarity']:.2f}")
+                            st.markdown(f"[Read Article]({news['link']})")
+        
+        with tab3:
             cols_to_show = ['Open', 'High', 'Low', 'Close', 'Volume', 'Pattern', 'RSI_14']
             cols_to_show = [c for c in cols_to_show if c in df.columns]
             st.dataframe(df[cols_to_show].tail(15).sort_index(ascending=False))
