@@ -3,3 +3,5 @@ pandas
 pandas_ta
 yfinance
 plotly
+textblob
+nltk
