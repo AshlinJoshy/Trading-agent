@@ -3,6 +3,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import time
+import json
+import os
 from data_loader import DataLoader
 from analyzer import Analyzer
 from assets import get_asset_options, get_ticker_from_option
@@ -30,27 +32,45 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Session State for Pinned Stocks
-if 'pinned_tickers' not in st.session_state:
-    st.session_state.pinned_tickers = ["AAPL", "BTC-USD", "EURUSD=X"]
+# --- Persistent Pinned Stocks Logic ---
+PINNED_FILE = "pinned_stocks.json"
 
+def load_pinned_stocks():
+    if os.path.exists(PINNED_FILE):
+        try:
+            with open(PINNED_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return ["AAPL", "BTC-USD", "EURUSD=X"] # Fallback
+    return ["AAPL", "BTC-USD", "EURUSD=X"] # Default
+
+def save_pinned_stocks(tickers):
+    with open(PINNED_FILE, "w") as f:
+        json.dump(tickers, f)
+
+# Initialize Session State from File if not already done
+if 'pinned_tickers' not in st.session_state:
+    st.session_state.pinned_tickers = load_pinned_stocks()
+
+# --- App Title ---
 st.title("Real-Time Trading Analysis & Pattern Recognition")
 
-# Sidebar
+# --- Sidebar ---
 st.sidebar.header("Configuration")
 
-# Pinned Stocks Logic
+# Pinned Stocks Selection
 st.sidebar.subheader("Pinned / Favorites")
 pinned_selection = st.sidebar.radio("Select a Pinned Stock:", ["None"] + st.session_state.pinned_tickers)
 
 if pinned_selection != "None":
     if st.sidebar.button(f"Remove '{pinned_selection}'"):
         st.session_state.pinned_tickers.remove(pinned_selection)
+        save_pinned_stocks(st.session_state.pinned_tickers) # Save on change
         st.sidebar.success(f"Removed {pinned_selection}")
         time.sleep(0.5) 
         st.rerun()
 
-# Combined Search Logic
+# Asset Search
 st.sidebar.subheader("Asset Search")
 
 asset_options = ["Type Manually / Custom"] + get_asset_options()
@@ -69,6 +89,7 @@ ticker_input = ticker_input_val
 if st.sidebar.button("Pin Current Asset"):
     if ticker_input not in st.session_state.pinned_tickers:
         st.session_state.pinned_tickers.append(ticker_input)
+        save_pinned_stocks(st.session_state.pinned_tickers) # Save on change
         st.sidebar.success(f"Pinned {ticker_input}")
 
 
@@ -115,8 +136,7 @@ def render_analysis():
         prediction = analyzer.get_prediction_next(df)
         latest_pattern = df['Pattern'].iloc[-1] if df['Pattern'].iloc[-1] else "None"
 
-        # KPI Metrics Layout - Responsive
-        # Use columns but allow them to wrap naturally or use smaller layout for mobile
+        # KPI Metrics Layout
         st.subheader(f"{ticker_input} - {last_price:.2f}")
         
         m1, m2, m3 = st.columns(3)
@@ -188,14 +208,32 @@ def render_analysis():
         # Volume
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume'), row=2, col=1)
 
-        # Mobile Optimized Layout
+        # Layout Improvements:
+        # 1. Legend at the top (orientation 'h') to avoid overlapping with nav controls (usually top right).
+        # 2. Dragmode 'pan' and ScrollZoom enabled for TradingView-like feel.
         fig.update_layout(
             xaxis_rangeslider_visible=False, 
             height=600, 
             margin=dict(l=10, r=10, t=30, b=10),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            legend=dict(
+                orientation="h", 
+                yanchor="bottom", 
+                y=1.02, 
+                xanchor="left", 
+                x=0
+            ),
+            dragmode='pan' # Default to pan instead of zoom select
         )
-        st.plotly_chart(fig, use_container_width=True)
+        
+        # Configure Plotly Config for better UX (TradingView-like)
+        config = {
+            'scrollZoom': True,
+            'displayModeBar': True,
+            'displaylogo': False,
+            'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+        }
+        
+        st.plotly_chart(fig, use_container_width=True, config=config)
 
         # Data Table
         with st.expander("View Raw Data & Signals"):
