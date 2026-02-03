@@ -10,6 +10,7 @@ from analyzer import Analyzer
 from assets import get_asset_options, get_ticker_from_option
 from sentiment import SentimentAnalyzer
 from backtester import Backtester
+from ai_analyst import AIAnalyst
 
 # Page config
 st.set_page_config(page_title="Real-Time Trading Analysis", layout="wide")
@@ -59,6 +60,11 @@ st.title("Real-Time Trading Analysis & Pattern Recognition")
 
 # --- Sidebar ---
 st.sidebar.header("Configuration")
+
+# AI Configuration
+st.sidebar.subheader("AI Configuration (Gemini)")
+gemini_api_key = st.sidebar.text_input("Gemini API Key", type="password")
+gemini_model = st.sidebar.selectbox("Gemini Model", ["gemini-pro", "gemini-1.5-flash"], index=1)
 
 # Pinned Stocks Selection
 st.sidebar.subheader("Pinned / Favorites")
@@ -116,6 +122,7 @@ loader = DataLoader(ticker_input)
 analyzer = Analyzer()
 sentiment_analyzer = SentimentAnalyzer()
 backtester = Backtester()
+ai_analyst = AIAnalyst(gemini_api_key)
 
 # Placeholder for content
 placeholder = st.empty()
@@ -268,9 +275,20 @@ def render_analysis():
         st.plotly_chart(fig, use_container_width=True, config=config)
 
         # --- Additional Features Tabs ---
-        tab1, tab2, tab3 = st.tabs(["Backtest Strategy", "News Sentiment", "Raw Data"])
+        tab1, tab2, tab3, tab4 = st.tabs(["AI Deep Dive", "Backtest Strategy", "News Sentiment", "Raw Data"])
         
         with tab1:
+            st.subheader("Gemini AI Analysis")
+            if not gemini_api_key:
+                st.warning("Please enter your Gemini API Key in the sidebar to use this feature.")
+            else:
+                if st.button("Generate Deep Dive Analysis"):
+                    with st.spinner(f"Consulting {gemini_model}... (Scanning News, Financials, and Technicals)"):
+                        # We pass the full df for technical context
+                        analysis_result = ai_analyst.analyze_stock(ticker_input, gemini_model, df)
+                        st.markdown(analysis_result)
+
+        with tab2:
             st.subheader("Strategy Backtest (Last 50 Candles)")
             if st.button("Run Backtest"):
                 with st.spinner("Running Backtest..."):
@@ -289,7 +307,7 @@ def render_analysis():
                         else:
                             st.warning("This strategy has been unprofitable recently. Proceed with caution.")
 
-        with tab2:
+        with tab3:
             st.subheader("Recent News Sentiment")
             if st.button("Analyze News"):
                 with st.spinner("Fetching & Analyzing News..."):
@@ -302,7 +320,7 @@ def render_analysis():
                             st.write(f"**Sentiment:** {news['polarity']:.2f}")
                             st.markdown(f"[Read Article]({news['link']})")
         
-        with tab3:
+        with tab4:
             cols_to_show = ['Open', 'High', 'Low', 'Close', 'Volume', 'Pattern', 'RSI_14']
             cols_to_show = [c for c in cols_to_show if c in df.columns]
             st.dataframe(df[cols_to_show].tail(15).sort_index(ascending=False))

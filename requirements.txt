@@ -5,3 +5,4 @@ yfinance
 plotly
 textblob
 nltk
+google-generativeai
